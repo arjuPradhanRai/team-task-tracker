@@ -13,13 +13,13 @@ services:
       REFRESH_SECRET: refresh123
     depends_on:
       mysql:
-        condition: service_healthy   # ← wait for MySQL to be actually ready
+        condition: service_healthy
       redis:
         condition: service_started
     restart: always
 
   mysql:
-    image: mysql:8.0          # ← pin to 8.0, "latest" can break things
+    image: mysql:8.0
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: root
@@ -28,17 +28,33 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-    healthcheck:              # ← lets "app" wait until MySQL is ready
+    healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
-    image: redis:7-alpine     # ← lighter, stable version
+    image: redis:7-alpine
     restart: always
     ports:
       - "6379:6379"
+
+  adminer:
+    image: adminer:latest
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mysql
+
+  frontend:
+    build: ../frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - app
+    restart: always
 
 volumes:
   mysql_data:

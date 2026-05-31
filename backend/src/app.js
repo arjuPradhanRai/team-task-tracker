@@ -4,9 +4,11 @@ const router = require('./routes/auth.routes')
 const swaggerUi = require("swagger-ui-express");
 
 const specs = require("./swagger");
+const cors = require("cors");
 
 const app = express()
 app.use(express.json());
+app.use(cors({ origin: "http://localhost:5173" }));
 app.use('/auth', router)
 app.use('/user', require('./routes/user.routes') )
 app.use('/project', require('./routes/project.routes') )
