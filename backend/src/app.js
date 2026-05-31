@@ -17,7 +17,10 @@ app.use(
     require("./middleware/error.middleware")
 );
 
+module.exports = app;
 
-app.listen(3000, () => {
-    console.log("Server running");
-});
+if (require.main === module) {
+    app.listen(3000, () => {
+        console.log("Server running");
+    });
+}
