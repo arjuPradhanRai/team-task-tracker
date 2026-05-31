@@ -17,6 +17,17 @@ const {
     logout
 } = require("../controllers/auth.controller");
 
+/**
+ * @swagger
+ * /auth/register:
+ *   post:
+ *     summary: Register user
+ *     tags: [Auth]
+ *     responses:
+ *       201:
+ *         description: User registered successfully
+ */
+
 router.post(
     "/register",
     validate(registerSchema),
