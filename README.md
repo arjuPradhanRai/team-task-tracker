@@ -6,25 +6,32 @@ A REST API for managing tasks within a team. Users belong to an organization, ha
 
 ## Getting Started
 
+### Quick Start (Docker)
+
 ```bash
-git clone <your-repo-url>
-cd team-task-tracker/backend
+git clone https://github.com/arjuPradhanRai/team-task-tracker.git
+cd team-task-tracker
 docker compose up --build
 ```
 
-That's it. The API is available at `http://localhost:3000` and Swagger docs at `http://localhost:3000/docs`.
-
-No manual setup, no local dependencies required.
-
-### Services started
+That's it. Everything is orchestrated and running:
 
 | Service  | URL                        |
 |----------|----------------------------|
-| API      | http://localhost:3000      |
 | Frontend | http://localhost:5173      |
+| API      | http://localhost:3000      |
+| API Docs | http://localhost:3000/docs |
 | Adminer  | http://localhost:8080      |
 | MySQL    | localhost:3306             |
 | Redis    | localhost:6379             |
+
+**No manual setup, no local dependencies required.**
+
+### Stopping Services
+
+```bash
+docker compose down
+```
 
 ---
 
