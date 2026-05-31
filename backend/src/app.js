@@ -12,6 +12,7 @@ app.use('/user', require('./routes/user.routes') )
 app.use('/project', require('./routes/project.routes') )
 app.use("/tasks", require("./routes/task.routes"));
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(specs));
+app.use("/analytics", require("./routes/analytics.routes"));
 
 app.use(
     require("./middleware/error.middleware")

@@ -1,0 +1,44 @@
+version: "3.8"
+
+services:
+
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: mysql://root:root@mysql:3306/task_tracker
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: secret123
+      REFRESH_SECRET: refresh123
+    depends_on:
+      mysql:
+        condition: service_healthy   # ← wait for MySQL to be actually ready
+      redis:
+        condition: service_started
+    restart: always
+
+  mysql:
+    image: mysql:8.0          # ← pin to 8.0, "latest" can break things
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: task_tracker
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:              # ← lets "app" wait until MySQL is ready
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine     # ← lighter, stable version
+    restart: always
+    ports:
+      - "6379:6379"
+
+volumes:
+  mysql_data:

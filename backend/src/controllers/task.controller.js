@@ -73,6 +73,9 @@ due_date
 
 });
 
+const keys = await redis.keys(`tasks:${req.user.organizationId}:*`);
+if (keys.length) await redis.del(keys);
+
 res.status(201).json(task);
 
 }catch(err){
@@ -131,26 +134,11 @@ data:JSON.parse(cached)
 const tasks =
 await prisma.task.findMany({
 
-where:{
-
-project:{
-
-organizationId:
-req.user.organizationId
-
-},
-
-status:
-req.query.status,
-
-priority:
-req.query.priority,
-
-assigneeId:
-req.query.assignee
-? Number(req.query.assignee)
-: undefined
-
+where: {
+  project: { organizationId: req.user.organizationId },
+  ...(req.query.status && { status: req.query.status }),
+  ...(req.query.priority && { priority: req.query.priority }),
+  ...(req.query.assignee && { assigneeId: Number(req.query.assignee) }),
 },
 
 skip,
@@ -265,6 +253,9 @@ data:req.body
 
 });
 
+const keys = await redis.keys(`tasks:${req.user.organizationId}:*`);
+if (keys.length) await redis.del(keys);
+
 res.json(task);
 
 }catch(err){
@@ -286,6 +277,8 @@ id:Number(req.params.id)
 }
 
 });
+    const keys = await redis.keys(`tasks:${req.user.organizationId}:*`);
+    if (keys.length) await redis.del(keys);
 
 res.json({
 
@@ -328,7 +321,7 @@ message:"Task missing"
 if(
 
 req.user.role!=="MANAGER" &&
-
+req.user.role !== "ADMIN" &&
 req.user.id!==task.assigneeId
 
 ){
@@ -376,6 +369,10 @@ req.body.status
 }
 
 });
+
+const keys = await redis.keys(`tasks:${req.user.organizationId}:*`);
+if (keys.length) await redis.del(keys);
+
 
 res.json(updated);
 

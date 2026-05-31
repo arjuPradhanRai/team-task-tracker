@@ -1,7 +1,5 @@
 module.exports = (err, req, res, next) => {
 
-    console.error(err);
-
      if (err.name === "ZodError") {
 
         return res.status(400).json({
