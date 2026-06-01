@@ -10,7 +10,7 @@ A REST API for managing tasks within a team. Users belong to an organization, ha
 
 ```bash
 git clone https://github.com/arjuPradhanRai/team-task-tracker.git
-cd team-task-tracker
+cd team-task-tracker/backend
 docker compose up --build
 ```
 
@@ -25,7 +25,7 @@ That's it. Everything is orchestrated and running:
 | MySQL    | localhost:3306             |
 | Redis    | localhost:6379             |
 
-**No manual setup, no local dependencies required.**
+**No manual setup, no local dependencies required. Database tables are created automatically on first run.**
 
 ### Stopping Services
 
@@ -61,10 +61,16 @@ Redis is used to cache task list responses per organization.
 ### Cache key format
 
 ```
-tasks:org:{organizationId}
+tasks:{organizationId}:{assignee}:{status}:{priority}:{page}:{limit}
 ```
 
-Tasks list is cached per organization. When a task is created, updated, or deleted within an org, the entire cache key is invalidated.
+### TTL
+
+Cache entries expire after **5 minutes** (300 seconds).
+
+### Invalidation
+
+All cache keys matching `tasks:{organizationId}:*` are deleted whenever a task is **created**, **updated**, **deleted**, or has its **status changed** within that organization. This ensures no stale data is served after any mutation while still serving cached responses for read-heavy list queries.
 
 ---
 
@@ -72,43 +78,49 @@ Tasks list is cached per organization. When a task is created, updated, or delet
 
 ### Authentication (`/auth`)
 
-| Method | Endpoint         | Description                      | Auth Required |
-|--------|------------------|----------------------------------|---------------|
-| POST   | `/auth/register` | Register a new user              | No            |
-| POST   | `/auth/login`    | Login with email & password      | No            |
-| POST   | `/auth/refresh`  | Refresh access token             | No            |
-| POST   | `/auth/logout`   | Logout user                      | Yes           |
+| Method | Endpoint         | Description                 | Auth Required |
+|--------|------------------|-----------------------------|---------------|
+| POST   | `/auth/register` | Register a new org + user   | No            |
+| POST   | `/auth/login`    | Login with email & password | No            |
+| POST   | `/auth/refresh`  | Refresh access token        | No            |
+| POST   | `/auth/logout`   | Logout user                 | Yes           |
 
 ### Users (`/users`)
 
-| Method | Endpoint   | Description          | Auth Required | Role Required |
-|--------|------------|----------------------|---------------|---------------|
-| POST   | `/users`   | Create new user      | Yes           | ADMIN         |
-| GET    | `/users`   | Get all users        | Yes           | ADMIN         |
+| Method | Endpoint  | Description     | Auth Required | Role Required |
+|--------|-----------|-----------------|---------------|---------------|
+| POST   | `/users`  | Create new user | Yes           | ADMIN         |
+| GET    | `/users`  | Get all users   | Yes           | ADMIN         |
 
 ### Projects (`/projects`)
 
-| Method | Endpoint   | Description         | Auth Required | Role Required      |
-|--------|------------|---------------------|---------------|--------------------|
-| POST   | `/`        | Create project      | Yes           | ADMIN, MANAGER     |
-| GET    | `/`        | Get all projects    | Yes           | Any authenticated  |
+| Method | Endpoint | Description      | Auth Required | Role Required     |
+|--------|----------|------------------|---------------|-------------------|
+| POST   | `/`      | Create project   | Yes           | ADMIN, MANAGER    |
+| GET    | `/`      | Get all projects | Yes           | Any authenticated |
 
 ### Tasks (`/tasks`)
 
-| Method | Endpoint          | Description              | Auth Required | Role Required      |
-|--------|-------------------|--------------------------|---------------|--------------------|
-| POST   | `/`               | Create task              | Yes           | ADMIN, MANAGER     |
-| GET    | `/`               | List all tasks           | Yes           | Any authenticated  |
-| GET    | `/:id`            | Get task by ID           | Yes           | Any authenticated  |
-| PUT    | `/:id`            | Update task              | Yes           | ADMIN, MANAGER     |
-| DELETE | `/:id`            | Delete task              | Yes           | ADMIN              |
-| PATCH  | `/:id/status`     | Change task status       | Yes           | ADMIN, MANAGER, MEMBER |
+| Method | Endpoint      | Description        | Auth Required | Role Required          |
+|--------|---------------|--------------------|---------------|------------------------|
+| POST   | `/`           | Create task        | Yes           | ADMIN, MANAGER         |
+| GET    | `/`           | List all tasks     | Yes           | Any authenticated      |
+| GET    | `/:id`        | Get task by ID     | Yes           | Any authenticated      |
+| PUT    | `/:id`        | Update task        | Yes           | ADMIN, MANAGER         |
+| DELETE | `/:id`        | Delete task        | Yes           | ADMIN                  |
+| PATCH  | `/:id/status` | Change task status | Yes           | ADMIN, MANAGER, MEMBER |
+
+### Analytics (`/analytics`)
+
+| Method | Endpoint | Description                                    | Auth Required | Role Required  |
+|--------|----------|------------------------------------------------|---------------|----------------|
+| GET    | `/`      | Overdue tasks per user + avg completion time   | Yes           | ADMIN, MANAGER |
 
 ---
 
 ## Authentication
 
-The API uses **JWT (JSON Web Tokens)** for authentication.
+The API uses **JWT (JSON Web Tokens)** for authentication with access + refresh token rotation.
 
 ### Token Format
 
@@ -116,146 +128,110 @@ The API uses **JWT (JSON Web Tokens)** for authentication.
 Authorization: Bearer <access_token>
 ```
 
-Include the access token in the `Authorization` header of all protected endpoints.
-
 ### Token Types
 
-- **Access Token** — Short-lived (typically 15-60 minutes), used for API requests
-- **Refresh Token** — Long-lived, used to obtain a new access token without re-logging in
+- **Access Token** — Short-lived, used for API requests
+- **Refresh Token** — Long-lived, stored in DB, rotated on every refresh to prevent reuse
 
 ---
 
-## User Roles
+## User Roles & Permissions
 
-The system supports three role levels:
+| Role    | Permissions                                                        |
+|---------|--------------------------------------------------------------------|
+| ADMIN   | Full access — manage users, projects, tasks within the org        |
+| MANAGER | Manage projects and tasks, assign members; cannot manage users     |
+| MEMBER  | View and update status only on tasks assigned to them             |
 
-| Role   | Permissions                                        |
-|--------|---------------------------------------------------|
-| ADMIN  | Create users, projects, tasks; delete anything; update all tasks |
-| MANAGER| Create projects and tasks; update tasks in their org |
-| MEMBER | Change task status for assigned tasks only        |
+RBAC is enforced at the middleware level, not inside controller logic.
+
+---
+
+## Status Transitions
+
+Task status follows enforced server-side transitions:
+
+```
+TODO → IN_PROGRESS → IN_REVIEW → DONE
+              ↘           ↘
+                      BLOCKED (reachable from any active state)
+```
+
+Free-form status updates are rejected. Only the assignee or a MANAGER/ADMIN can advance a task's status.
 
 ---
 
 ## Environment Variables
 
-Create a `.env` file in the `backend/` directory with the following variables:
+The following are set inside `docker-compose.yml` and require no manual configuration for Docker runs:
 
 ```env
-# Database
-DATABASE_URL=mysql://root:password@mysql:3306/team_task_tracker
-
-# JWT
-JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-JWT_EXPIRY=3600
-
-# Redis
+DATABASE_URL=mysql://root:root@mysql:3306/task_tracker
 REDIS_URL=redis://redis:6379
-
-# Node Environment
-NODE_ENV=production
-
-# Server
-PORT=3000
+JWT_SECRET=secret123
+REFRESH_SECRET=refresh123
 ```
 
----
-
-## Development Setup (Local)
-
-### Prerequisites
-
-- Node.js 20+
-- npm or yarn
-- MySQL 8.0+
-- Redis 6.0+
-
-### Installation
-
-```bash
-cd backend
-npm install
-```
-
-### Running Locally
-
-```bash
-npm run dev
-```
-
-The server starts at `http://localhost:3000`.
-
----
-
-## Testing
-
-Run the test suite:
-
-```bash
-npm test
-```
-
-Tests are written using **Jest** and **Supertest** for API integration testing.
+For local development, create a `.env` file in `backend/` with the above values pointing to your local MySQL and Redis instances.
 
 ---
 
 ## Project Structure
 
 ```
-backend/
-├── src/
-│   ├── app.js                    # Express app setup
-│   ├── swagger.js                # Swagger/OpenAPI config
-│   ├── controllers/              # Route handlers
-│   ├── routes/                   # API route definitions
-│   ├── middleware/               # Custom middleware
-│   ├── services/                 # Business logic
-│   ├── repositories/             # Data access layer
-│   ├── validations/              # Input schemas (Zod)
-│   ├── utils/                    # Helper functions
-│   │   ├── prismaClient.js       # Prisma ORM client
-│   │   ├── jwt.js                # JWT token generation
-│   │   ├── redis.js              # Redis client
-│   │   └── statusTransition.js   # Task status validation
-│   ├── cache/                    # Caching logic
-│   └── tests/                    # Test files
-├── prisma/
-│   └── schema.prisma             # Database schema
-├── Dockerfile                    # Docker image definition
-├── docker-compose.yml            # Multi-container setup
-├── package.json                  # Dependencies
-└── .env                          # Environment variables
+team-task-tracker/
+├── backend/
+│   ├── src/
+│   │   ├── app.js                 # Express app setup
+│   │   ├── swagger.js             # Swagger/OpenAPI config
+│   │   ├── controllers/           # Route handlers
+│   │   ├── routes/                # API route definitions
+│   │   ├── middleware/            # Auth, RBAC, error handling
+│   │   ├── validations/           # Input schemas (Zod)
+│   │   └── utils/
+│   │       ├── prismaClient.js    # Prisma ORM client
+│   │       ├── jwt.js             # JWT token generation
+│   │       ├── redis.js           # Redis client
+│   │       └── statusTransition.js# Task status validation
+│   ├── prisma/
+│   │   ├── schema.prisma          # Database schema
+│   │   └── migrations/            # Auto-applied on docker compose up
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── package.json
+└── frontend/
+    ├── src/
+    │   ├── pages/                 # Login, Register, Tasks, Analytics
+    │   ├── components/            # Navbar, Badge
+    │   └── api/axios.js           # API client with auth interceptor
+    └── Dockerfile
 ```
 
 ---
 
-## Docker Deployment
+## Error Handling
 
-### Build and Run
+All endpoints return standardized error responses:
 
-```bash
-docker compose up --build -d
+```json
+{
+  "status": 400,
+  "code": "VALIDATION_ERROR",
+  "message": "due_date must be a future date"
+}
 ```
 
-This starts:
-- **API** on port 3000
-- **MySQL** on port 3306
-- **Redis** on port 6379
-- **Adminer** (DB UI) on port 8080
+Common status codes:
 
-### View Logs
-
-```bash
-docker logs backend-app
-docker logs mysql
-docker logs redis
-```
-
-### Stop Services
-
-```bash
-docker compose down
-```
+| Code | Meaning                              |
+|------|--------------------------------------|
+| 200  | Success                              |
+| 201  | Created                              |
+| 400  | Validation error                     |
+| 401  | Unauthorized (missing/invalid token) |
+| 403  | Forbidden (insufficient permissions) |
+| 404  | Not found                            |
+| 500  | Server error                         |
 
 ---
 
@@ -267,39 +243,19 @@ Once the API is running, visit:
 http://localhost:3000/docs
 ```
 
-All endpoints are fully documented with request/response examples and try-it-out functionality.
+All endpoints are fully documented with request/response schemas and try-it-out functionality.
 
 ---
 
-## Error Handling
+## What I Would Improve Given More Time
 
-The API returns standardized error responses:
-
-```json
-{
-  "status": 400,
-  "code": "VALIDATION_ERROR",
-  "message": "Email is invalid"
-}
-```
-
-Common status codes:
-- `200` — Success
-- `201` — Created
-- `400` — Validation error
-- `401` — Unauthorized (missing/invalid token)
-- `403` — Forbidden (insufficient permissions)
-- `404` — Not found
-- `500` — Server error
-
----
-
-## Contributing
-
-1. Create a feature branch: `git checkout -b feature/your-feature`
-2. Commit changes: `git commit -m "Add your feature"`
-3. Push to branch: `git push origin feature/your-feature`
-4. Submit a pull request
+- **Rate limiting** on auth endpoints to prevent brute force attacks
+- **SCAN instead of KEYS** for Redis cache invalidation — `KEYS` is O(N) and blocks Redis on large keysets
+- **Invite flow** — allow ADMIN to invite users to an existing organization via email
+- **WebSocket notifications** — real-time status change events pushed to the assignee
+- **Integration tests** — full coverage for auth flow and status transition enforcement
+- **Refresh token reuse detection** — invalidate entire token family on reuse attack
+- **Pagination metadata** — return `total`, `totalPages`, `hasNext` in list responses
 
 ---
 
